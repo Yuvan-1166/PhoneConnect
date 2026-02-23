@@ -1,0 +1,9 @@
+.env
+node_modules/
+.vscode/
+*.md
+.backup
+venv/ 
+dist/
+*.json
+*.yaml
