@@ -1,12 +1,35 @@
 [package]
-name = "client"
+name = "dial"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[[bin]]
+name = "dial"
+path = "src/main.rs"
 
 [dependencies]
+# CLI argument parsing
 clap = { version = "4", features = ["derive"] }
-reqwest = { version = "0.11", features = ["json", "blocking"] }
+
+# Async HTTP client
+reqwest = { version = "0.12", features = ["json"] }
+
+# Async runtime
 tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+
+# Serialisation
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+
+# Config file (.toml)
+toml = "0.8"
+
+# Platform config/home directory
+dirs = "5"
+
+# Error handling
+thiserror = "1"
+anyhow    = "1"
+
+# Terminal output
 colored = "2"
