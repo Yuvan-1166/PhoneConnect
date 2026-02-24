@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Network Security Configuration
+    ───────────────────────────────
+    Android 9+ blocks all cleartext (plain HTTP/WS) traffic by default.
+
+    Policy applied here:
+      • Private LAN ranges (192.168.x.x, 10.x.x.x, 172.16-31.x.x) and
+        localhost are whitelisted for cleartext — covers local dev setups
+        where the gateway runs over plain ws://.
+      • Everything else (public internet) is still required to use TLS.
+      • In debug builds, cleartext is permitted globally so emulators and
+        arbitrary test servers work without additional config.
+
+    For production: run the gateway behind TLS and switch the app URL to
+    wss:// — at that point this file is no longer needed.
+-->
+<network-security-config>
+
+    <!--
+        debug-overrides: trust user-installed CA certs (e.g. mitmproxy, Charles).
+        Cleartext is handled by usesCleartextTraffic="true" in the manifest
+        for debug builds — that attribute takes precedence over this config.
+    -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="user" />
+            <certificates src="system" />
+        </trust-anchors>
+    </debug-overrides>
+
+    <!--
+        Allow cleartext for every host.
+        usesCleartextTraffic="true" in AndroidManifest.xml is the primary
+        switch — this base-config is a belt-and-braces fallback.
+        For production: set both to false and use wss://.
+    -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+</network-security-config>

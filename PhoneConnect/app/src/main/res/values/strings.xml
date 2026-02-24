@@ -1,3 +1,9 @@
 <resources>
-    <string name="app_name">Phone Connect</string>
+    <string name="app_name">PhoneConnect</string>
+    <string name="notif_channel_name">Gateway Connection</string>
+    <string name="notif_channel_desc">Shows the WebSocket gateway connection status</string>
+    <string name="status_connected">Connected to gateway</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="action_stop">Stop</string>
 </resources>

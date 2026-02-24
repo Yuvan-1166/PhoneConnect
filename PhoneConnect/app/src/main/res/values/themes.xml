@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
+    <!-- Base app theme used by all activities -->
     <style name="Theme.PhoneConnect" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Splash screen theme — applied only to MainActivity during launch -->
+    <style name="Theme.PhoneConnect.Splash" parent="Theme.SplashScreen">
+        <!-- Keep background white / primary colour until Compose takes over -->
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="postSplashScreenTheme">@style/Theme.PhoneConnect</item>
+    </style>
+
 </resources>
