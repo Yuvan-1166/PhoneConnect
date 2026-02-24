@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.phoneconnect.data.prefs.AppPreferences
 import com.example.phoneconnect.network.ConnectionState
+import com.example.phoneconnect.network.DiscoveryState
 import com.example.phoneconnect.service.ServiceBus
 import com.example.phoneconnect.service.WsService
 import com.example.phoneconnect.telephony.CallLifecycle
@@ -25,6 +26,7 @@ data class HomeUiState(
     val callLifecycle:   CallLifecycle   = CallLifecycle.Idle,
     val logs:            List<String>    = emptyList(),
     val serviceRunning:  Boolean         = false,
+    val discoveryState:  DiscoveryState  = DiscoveryState.Idle,
 )
 
 /**
@@ -76,6 +78,12 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
                 _homeState.update { it.copy(serviceRunning = running) }
             }
         }
+        // Observe gateway discovery state
+        viewModelScope.launch {
+            ServiceBus.discoveryState.collect { discovery ->
+                _homeState.update { it.copy(discoveryState = discovery) }
+            }
+        }
         // Collect incremental logs (keep last 500 entries to avoid OOM)
         viewModelScope.launch {
             ServiceBus.logs.collect { entry ->
@@ -104,5 +112,9 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
             prefs.setToken(token)
             WsService.reconfigure(getApplication())
         }
+    }
+
+    fun startScan() {
+        WsService.startScan(getApplication())
     }
 }

@@ -24,7 +24,10 @@ class AppPreferences(private val context: Context) {
         private val KEY_DEVICE_ID  = stringPreferencesKey("device_id")
         private val KEY_TOKEN      = stringPreferencesKey("token")
 
-        private const val DEFAULT_SERVER_URL = "ws://192.168.1.100:3000/ws"
+        const val DEFAULT_SERVER_URL = "ws://192.168.1.100:3000/ws"
+
+        /** Returns true if [url] is the unconfigured factory placeholder. */
+        fun isPlaceholderUrl(url: String) = url == DEFAULT_SERVER_URL || url.isBlank()
     }
 
     // ── Reactive Flows ────────────────────────────────────────────────────────

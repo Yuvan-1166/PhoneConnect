@@ -17,6 +17,8 @@ import com.example.phoneconnect.MainActivity
 import com.example.phoneconnect.R
 import com.example.phoneconnect.data.prefs.AppPreferences
 import com.example.phoneconnect.network.ConnectionState
+import com.example.phoneconnect.network.DiscoveryState
+import com.example.phoneconnect.network.GatewayDiscovery
 import com.example.phoneconnect.network.WsManager
 import com.example.phoneconnect.telephony.CallManager
 import com.google.gson.Gson
@@ -33,9 +35,10 @@ private const val NOTIF_CHANNEL   = "phoneconnect_ws"
 private const val NOTIF_ID        = 1001
 
 // Intent actions used by the Activity / BootReceiver
-const val ACTION_START      = "com.example.phoneconnect.ACTION_START"
-const val ACTION_STOP       = "com.example.phoneconnect.ACTION_STOP"
+const val ACTION_START       = "com.example.phoneconnect.ACTION_START"
+const val ACTION_STOP        = "com.example.phoneconnect.ACTION_STOP"
 const val ACTION_RECONFIGURE = "com.example.phoneconnect.ACTION_RECONFIGURE"
+const val ACTION_SCAN        = "com.example.phoneconnect.ACTION_SCAN"
 
 /**
  * Persistent foreground Service that owns the [WsManager] and [CallManager].
@@ -57,6 +60,7 @@ class WsService : Service() {
         private set
 
     private lateinit var prefs: AppPreferences
+    private lateinit var discovery: GatewayDiscovery
 
     // ── Service lifecycle ─────────────────────────────────────────────────────
 
@@ -64,6 +68,18 @@ class WsService : Service() {
         super.onCreate()
         Log.d(TAG, "onCreate")
         prefs = AppPreferences(applicationContext)
+
+        // Auto-discovery: when a gateway is found on the LAN, save the URL to prefs.
+        // loadPrefsAndConnect's collectLatest will pick up the new URL and reconnect.
+        discovery = GatewayDiscovery(
+            context = applicationContext,
+            onFound = { wsUrl ->
+                serviceScope.launch(Dispatchers.IO) {
+                    Log.i(TAG, "Gateway auto-discovered: $wsUrl — saving and reconnecting")
+                    prefs.setServerUrl(wsUrl)
+                }
+            },
+        )
 
         wsManager = WsManager(
             gson = Gson(),
@@ -89,6 +105,7 @@ class WsService : Service() {
         ServiceBus.setServiceRunning(true)
         observeConnectionState()
         observeCallLifecycle()
+        observeDiscoveryState()
         observeLogs()
     }
 
@@ -96,10 +113,15 @@ class WsService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 Log.d(TAG, "Stop requested")
+                discovery.stopDiscovery()
                 wsManager.disconnect()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
+            }
+            ACTION_SCAN -> {
+                Log.d(TAG, "Manual scan requested")
+                discovery.startDiscovery()
             }
             ACTION_RECONFIGURE, ACTION_START -> {
                 Log.d(TAG, "Start/reconfigure requested")
@@ -118,6 +140,7 @@ class WsService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "onDestroy")
+        discovery.destroy()
         wsManager.destroy()
         callManager.destroy()
         ServiceBus.setServiceRunning(false)
@@ -138,8 +161,16 @@ class WsService : Service() {
                     wsManager.disconnect()
                     wsManager.configure(url, id, token)
                     wsManager.connect()
-                    // collectLatest cancels the previous collection, so
-                    // if prefs change the connection is automatically rebuilt.
+
+                    // Auto-Discovery: if URL is still the factory placeholder,
+                    // scan the LAN for a PhoneConnect gateway.
+                    if (AppPreferences.isPlaceholderUrl(url)) {
+                        Log.d(TAG, "No configured URL — starting gateway discovery")
+                        updateNotification("Scanning for gateway…")
+                        discovery.startDiscovery()
+                    } else {
+                        discovery.stopDiscovery()
+                    }
                 }
         }
     }
@@ -157,6 +188,18 @@ class WsService : Service() {
                     is ConnectionState.Error        -> "Error: ${state.message}"
                 }
                 updateNotification(text)
+            }
+        }
+    }
+
+    private fun observeDiscoveryState() {
+        serviceScope.launch {
+            discovery.state.collectLatest { state ->
+                ServiceBus.emitDiscoveryState(state)
+                // Update notification text while scanning
+                if (state is DiscoveryState.Scanning) {
+                    updateNotification("Scanning for gateway…")
+                }
             }
         }
     }
@@ -240,6 +283,13 @@ class WsService : Service() {
                 action = ACTION_RECONFIGURE
             }
             context.startForegroundService(intent)
+        }
+
+        fun startScan(context: Context) {
+            val intent = Intent(context, WsService::class.java).apply {
+                action = ACTION_SCAN
+            }
+            context.startService(intent)
         }
     }
 }

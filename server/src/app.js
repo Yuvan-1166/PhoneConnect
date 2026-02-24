@@ -7,6 +7,7 @@ import logger from "./logger.js";
 import connectionManager from "./connectionManager.js";
 import { handleMessage } from "./messageHandler.js";
 import apiRouter from "./routes/call.js";
+import { startMdnsAdvertisement, stopMdnsAdvertisement } from "./discovery.js";
 
 const log = logger.child({ module: "app" });
 
@@ -67,6 +68,7 @@ wss.on("error", (err) => {
 
 function shutdown(signal) {
   log.info({ signal }, "Shutting down gracefully…");
+  stopMdnsAdvertisement();
   wss.close(() => {
     server.close(() => {
       log.info("Server closed");
@@ -95,5 +97,7 @@ server.listen(PORT, () => {
     },
     "PhoneConnect gateway started"
   );
+  // Advertise on the LAN so Android devices auto-discover this server
+  startMdnsAdvertisement(PORT);
 });
 

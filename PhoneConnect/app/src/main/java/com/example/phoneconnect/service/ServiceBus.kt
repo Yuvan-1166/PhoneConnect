@@ -1,6 +1,7 @@
 package com.example.phoneconnect.service
 
 import com.example.phoneconnect.network.ConnectionState
+import com.example.phoneconnect.network.DiscoveryState
 import com.example.phoneconnect.telephony.CallLifecycle
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,10 +31,14 @@ object ServiceBus {
     private val _serviceRunning = MutableStateFlow(false)
     val serviceRunning: StateFlow<Boolean> = _serviceRunning.asStateFlow()
 
+    private val _discoveryState = MutableStateFlow<DiscoveryState>(DiscoveryState.Idle)
+    val discoveryState: StateFlow<DiscoveryState> = _discoveryState.asStateFlow()
+
     // ── Emit helpers (called by WsService) ───────────────────────────────────
 
     fun emitConnectionState(state: ConnectionState)  { _connectionState.value = state }
     fun emitCallLifecycle(lifecycle: CallLifecycle)  { _callLifecycle.value = lifecycle }
     suspend fun emitLog(entry: String)               { _logs.emit(entry) }
     fun setServiceRunning(running: Boolean)          { _serviceRunning.value = running }
+    fun emitDiscoveryState(state: DiscoveryState)    { _discoveryState.value = state }
 }
