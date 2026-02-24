@@ -15,6 +15,10 @@ pub struct Config {
     pub token: String,
 }
 
+/// The factory-default URL written by `config init`.
+/// If the config still has this value, auto-discovery is triggered.
+pub const PLACEHOLDER_URL: &str = "http://10.61.214.187:3000";
+
 impl Config {
     // ── Paths ─────────────────────────────────────────────────────────────────
 
@@ -56,7 +60,7 @@ impl Config {
         }
 
         let default = Config {
-            server_url: "http://10.61.214.187:3000".to_string(),
+            server_url: PLACEHOLDER_URL.to_string(),
             token: "change-me-secret".to_string(),
         };
 
@@ -67,7 +71,26 @@ impl Config {
         Ok(path)
     }
 
-    /// Validate that required fields are non-empty and the URL looks reasonable.
+    /// Persist the current state back to the config file.
+    /// Creates parent directories if needed.
+    pub fn save(&self) -> Result<(), DialError> {
+        let path = Self::path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let toml_str = toml::to_string_pretty(self)
+            .expect("config must serialise");
+        fs::write(&path, toml_str)?;
+        Ok(())
+    }
+
+    /// Returns `true` if the URL is the unconfigured placeholder or blank.
+    /// This triggers automatic mDNS discovery instead of connecting directly.
+    pub fn is_placeholder(&self) -> bool {
+        self.server_url.trim().is_empty() || self.server_url == PLACEHOLDER_URL
+    }
+
+    /// Validate that required fields are non-empty.
     pub fn validate(&self) -> Result<(), DialError> {
         if self.token.trim().is_empty() {
             return Err(DialError::Unauthorized);

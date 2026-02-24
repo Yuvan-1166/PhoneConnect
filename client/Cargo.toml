@@ -31,5 +31,8 @@ dirs = "5"
 thiserror = "1"
 anyhow    = "1"
 
+# mDNS/DNS-SD discovery (same mechanism as KDE Connect / Chromecast)
+mdns-sd = "0.11"
+
 # Terminal output
 colored = "2"

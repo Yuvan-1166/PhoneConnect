@@ -1,12 +1,16 @@
 mod api;
 mod config;
+mod discover;
 mod errors;
+
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 
 use api::{GatewayClient, validate_phone};
 use config::Config;
+use discover::discover_gateway;
 use errors::DialError;
 
 // ── CLI definition ─────────────────────────────────────────────────────────────
@@ -15,6 +19,10 @@ use errors::DialError;
 #[derive(Parser)]
 #[command(name = "dial", version, about, long_about = None)]
 struct Cli {
+    /// Override discovery timeout in seconds (default: 5)
+    #[arg(long, global = true, default_value = "5")]
+    timeout: u64,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -35,6 +43,9 @@ enum Commands {
 
     /// Check gateway health
     Status,
+
+    /// Scan the LAN for a PhoneConnect gateway and save its URL to config
+    Discover,
 
     /// Manage configuration
     Config {
@@ -70,7 +81,72 @@ async fn main() {
     }
 }
 
+// ── Config resolution with auto-discovery ─────────────────────────────────────
+
+/// Load config and, if the URL is still the placeholder, auto-discover the
+/// gateway via mDNS — same as typing `dial discover` but transparent.
+///
+/// If discovery finds a gateway the new URL is **persisted** to the config file
+/// so the next invocation is instant (no re-scan unless the IP changes again).
+async fn resolve_config(timeout_secs: u64) -> Result<Config, DialError> {
+    // Load or create a default config
+    let mut cfg = match Config::load() {
+        Ok(c) => c,
+        Err(DialError::ConfigNotFound { .. }) => {
+            // First run: write defaults and proceed to discovery
+            Config::write_default()?;
+            Config::load()?
+        }
+        Err(e) => return Err(e),
+    };
+
+    if cfg.is_placeholder() {
+        println!(
+            "{} No gateway URL configured — scanning LAN ({timeout_secs}s)…",
+            "◎".cyan()
+        );
+
+        let timeout = Duration::from_secs(timeout_secs);
+        match discover_gateway(timeout).await {
+            Some(found) => {
+                println!(
+                    "{} Gateway found at {}:{} — saving to config",
+                    "✓".green().bold(),
+                    found.host.cyan(),
+                    found.port.to_string().cyan(),
+                );
+                cfg.server_url = found.url;
+                // Persist so next run skips the scan
+                if let Err(e) = cfg.save() {
+                    eprintln!("{} Could not save config: {e}", "warn:".yellow());
+                }
+            }
+            None => {
+                eprintln!(
+                    "{} No gateway found on LAN within {timeout_secs}s.",
+                    "!".yellow()
+                );
+                eprintln!(
+                    "  Start the gateway on your laptop, or run {} to set the URL manually.",
+                    "dial config init".cyan()
+                );
+                return Err(DialError::GatewayError {
+                    status: 0,
+                    body: "Gateway not found via mDNS. Make sure the server is running on the same network.".into(),
+                });
+            }
+        }
+    }
+
+    cfg.validate()?;
+    Ok(cfg)
+}
+
+// ── Command handlers ───────────────────────────────────────────────────────────
+
 async fn run(cli: Cli) -> Result<(), DialError> {
+    let timeout_secs = cli.timeout;
+
     match cli.command {
         // ── dial call <device_id> <number> ─────────────────────────────────────
         Commands::Call { device_id, number } => {
@@ -79,8 +155,7 @@ async fn run(cli: Cli) -> Result<(), DialError> {
             }
             validate_phone(&number)?;
 
-            let config = Config::load()?;
-            config.validate()?;
+            let config = resolve_config(timeout_secs).await?;
             let client = GatewayClient::new(&config);
 
             println!(
@@ -92,28 +167,21 @@ async fn run(cli: Cli) -> Result<(), DialError> {
 
             let result = client.call(&device_id, &number).await?;
 
-            println!(
-                "{} Call command sent!",
-                "✓".green().bold()
-            );
+            println!("{} Call command sent!", "✓".green().bold());
             println!("  Device : {}", result.device_id.cyan());
             println!("  Command: {}", result.command_id.dimmed());
         }
 
         // ── dial devices ───────────────────────────────────────────────────────
         Commands::Devices => {
-            let config = Config::load()?;
+            let config = resolve_config(timeout_secs).await?;
             let client = GatewayClient::new(&config);
-            let resp = client.devices().await?;
+            let resp   = client.devices().await?;
 
             if resp.devices.is_empty() {
                 println!("{} No devices currently connected.", "○".dimmed());
             } else {
-                println!(
-                    "{} {} device(s) connected\n",
-                    "●".green().bold(),
-                    resp.count
-                );
+                println!("{} {} device(s) connected\n", "●".green().bold(), resp.count);
                 for dev in &resp.devices {
                     println!(
                         "  {} {}  (connected since {})",
@@ -127,17 +195,66 @@ async fn run(cli: Cli) -> Result<(), DialError> {
 
         // ── dial status ────────────────────────────────────────────────────────
         Commands::Status => {
-            let config = Config::load()?;
+            let config = resolve_config(timeout_secs).await?;
             let client = GatewayClient::new(&config);
             let health = client.health().await?;
 
             println!("{} Gateway is reachable", "✓".green().bold());
-            println!("  URL:              {}", config.server_url.cyan());
+            println!("  URL:               {}", config.server_url.cyan());
             if let Some(uptime) = health.get("uptime").and_then(|v| v.as_f64()) {
-                println!("  Uptime:           {:.0}s", uptime);
+                println!("  Uptime:            {:.0}s", uptime);
             }
             if let Some(count) = health.get("connectedDevices").and_then(|v| v.as_u64()) {
-                println!("  Connected devices:{}", count);
+                println!("  Connected devices: {}", count);
+            }
+        }
+
+        // ── dial discover ──────────────────────────────────────────────────────
+        Commands::Discover => {
+            println!(
+                "{} Scanning for PhoneConnect gateway ({timeout_secs}s)…",
+                "◎".cyan()
+            );
+
+            let timeout = Duration::from_secs(timeout_secs);
+            match discover_gateway(timeout).await {
+                Some(found) => {
+                    println!(
+                        "{} Gateway found!\n  Host: {}\n  Port: {}\n  URL:  {}",
+                        "✓".green().bold(),
+                        found.host.cyan(),
+                        found.port.to_string().cyan(),
+                        found.url.cyan(),
+                    );
+
+                    // Save to config
+                    match Config::load() {
+                        Ok(mut cfg) => {
+                            cfg.server_url = found.url;
+                            cfg.save()?;
+                            println!(
+                                "{} Saved to {}",
+                                "↳".dimmed(),
+                                Config::path().display().to_string().dimmed()
+                            );
+                        }
+                        Err(_) => {
+                            // No config file yet — create one
+                            let path = Config::write_default()?;
+                            let mut cfg = Config::load()?;
+                            cfg.server_url = found.url;
+                            cfg.save()?;
+                            println!("{} Config created at {}", "↳".dimmed(), path.display().to_string().dimmed());
+                        }
+                    }
+                }
+                None => {
+                    eprintln!(
+                        "{} No gateway found within {timeout_secs}s. Is the server running?",
+                        "✗".red().bold()
+                    );
+                    std::process::exit(1);
+                }
             }
         }
 
@@ -150,7 +267,7 @@ async fn run(cli: Cli) -> Result<(), DialError> {
                     "✓".green().bold(),
                     path.display().to_string().cyan()
                 );
-                println!("  Edit it to set your server URL and token.");
+                println!("  server_url is set to the placeholder — run {} to auto-detect the gateway.", "dial discover".cyan());
             }
             ConfigCmd::Path => {
                 println!("{}", Config::path().display());
