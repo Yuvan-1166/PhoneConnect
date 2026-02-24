@@ -93,10 +93,10 @@ class WsManager(
     private var reconnectJob: Job? = null
     private var pingJob: Job? = null
 
-    /** Bounded dedup set: tracks the last 200 processed command IDs. */
-    private val processedIds: MutableSet<String> = object : LinkedHashMap<String, Boolean>(256, 0.75f, true) {
+    /** Bounded dedup map: tracks the last 200 processed command IDs. */
+    private val processedIds: LinkedHashMap<String, Boolean> = object : LinkedHashMap<String, Boolean>(256, 0.75f, true) {
         override fun removeEldestEntry(eldest: Map.Entry<String, Boolean>) = size > 200
-    }.keys
+    }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -210,11 +210,11 @@ class WsManager(
                     val number    = obj.get("number")?.asString ?: return
                     val commandId = obj.get("id")?.asString ?: ""
 
-                    if (commandId.isNotBlank() && processedIds.contains(commandId)) {
+                    if (commandId.isNotBlank() && processedIds.containsKey(commandId)) {
                         log("Duplicate command $commandId — ignored")
                         return
                     }
-                    if (commandId.isNotBlank()) processedIds.add(commandId)
+                    if (commandId.isNotBlank()) processedIds[commandId] = true
 
                     // Validate phone number (E.164 basic check)
                     if (!isValidPhone(number)) {
