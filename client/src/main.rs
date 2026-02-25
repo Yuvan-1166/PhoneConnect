@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 
 use api::{GatewayClient, validate_phone};
-use bluetooth::{list_bt_cards, mac_to_card_name, switch_to_a2dp, switch_to_hfp};
+use bluetooth::{activate_hfp, list_bt_cards, mac_to_card_name, switch_to_a2dp, switch_to_hfp};
 use config::Config;
 use discover::discover_gateway;
 use errors::DialError;
@@ -202,25 +202,37 @@ async fn run(cli: Cli) -> Result<(), DialError> {
             // ── Resolve BT MAC: CLI flag takes precedence, then config fallback ─────
             let config = resolve_config(timeout_secs).await?;
             let effective_bt_mac = bt_mac.or_else(|| config.bt_mac.clone());
-
-            // ── Optional: auto-switch BT to HFP before the call ──────────────
             let bt_card_name = effective_bt_mac.as_deref().map(mac_to_card_name);
 
-            if let Some(ref card) = bt_card_name {
+            // ── Optional: auto-switch BT to HFP + open SCO socket ───────────
+            // `activate_hfp` switches the profile AND spawns pw-loopback
+            // processes that keep the Bluetooth SCO audio socket alive.
+            // Without this the HFP nodes stay SUSPENDED → dead silence.
+            // The session is kept alive until the call command returns.
+            let _hfp_session = if let Some(ref card) = bt_card_name {
                 use bluetooth::HfpCodec;
-                print!("{} Switching Bluetooth to HFP call-audio mode… ", "♫".cyan());
-                match switch_to_hfp(card) {
-                    Ok(HfpCodec::PhoneGateway) => {
-                        println!("{} (Audio Gateway — phone HFP active)", "done".green().bold());
+                print!("{} Opening HFP call-audio channel… ", "♫".cyan());
+                match activate_hfp(card) {
+                    Ok(session) => {
+                        match &session.codec {
+                            HfpCodec::PhoneGateway =>
+                                println!("{} (Audio Gateway — phone HFP active)",
+                                    "done".green().bold()),
+                            codec =>
+                                println!("{} ({})", "done".green().bold(), codec.label()),
+                        }
+                        Some(session)
                     }
-                    Ok(codec) => println!("{} ({})", "done".green().bold(), codec.label()),
-                    Err(e)    => {
+                    Err(e) => {
                         eprintln!();
-                        eprintln!("{} BT switch failed: {e}", "warn:".yellow());
+                        eprintln!("{} BT HFP activation failed: {e}", "warn:".yellow());
                         eprintln!("  Continuing — audio will stay on the phone speaker.");
+                        None
                     }
                 }
-            }
+            } else {
+                None
+            };
 
             let client = GatewayClient::new(&config);
 
@@ -238,18 +250,36 @@ async fn run(cli: Cli) -> Result<(), DialError> {
             println!("  Command: {}", result.command_id.dimmed());
 
             // ── Remind the user how to restore audio after the call ───────────
-            if let Some(ref card) = bt_card_name {
+            if let Some(ref _session) = _hfp_session {
                 let mac_display = effective_bt_mac.as_deref().unwrap_or("");
                 println!();
                 println!(
-                    "  {} Audio is now routed to your laptop via BT HFP.",
+                    "  {} Audio is routed to your headset via BT HFP (SCO active).",
                     "♫".cyan()
                 );
                 println!(
-                    "  When the call ends, run: {}",
-                    format!("dial bt a2dp {mac_display}").cyan()
+                    "  {} Keep this terminal open for the duration of the call.",
+                    "!".yellow()
                 );
-                let _ = card; // suppress unused-variable warning on non-Linux
+                println!(
+                    "  Press {} when you hang up to restore A2DP stereo.",
+                    "Enter".cyan()
+                );
+                // Block until Enter so the HfpSession (and its loopback
+                // processes) stays alive for the full duration of the call.
+                // Once the user presses Enter this scope exits, Drop runs,
+                // the loopbacks are killed, and A2DP is restored.
+                let _ = {
+                    let mut buf = String::new();
+                    std::io::stdin().read_line(&mut buf)
+                };
+                println!(
+                    "  {} Restoring A2DP stereo…",
+                    "♫".cyan()
+                );
+                // HfpSession::drop() fires here — kills loopbacks, restores A2DP.
+                let _ = &bt_card_name; // suppress unused-variable warning on non-Linux
+                let _ = mac_display;
             }
         }
 
