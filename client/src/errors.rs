@@ -31,4 +31,8 @@ pub enum DialError {
 
     #[error("Unauthorized — check the token in your config file")]
     Unauthorized,
+
+    // ── Bluetooth ─────────────────────────────────────────────────────────────
+    #[error("Bluetooth error: {0}")]
+    Bluetooth(String),
 }

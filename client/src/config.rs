@@ -13,6 +13,12 @@ pub struct Config {
 
     /// Bearer token that matches GATEWAY_TOKENS on the server
     pub token: String,
+
+    /// Bluetooth MAC of the phone to use for HFP audio routing.
+    /// When set, `dial call` will auto-switch BT to HFP without --bt-mac.
+    /// Format: AA:BB:CC:DD:EE:FF
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bt_mac: Option<String>,
 }
 
 /// The factory-default URL written by `config init`.
@@ -62,6 +68,7 @@ impl Config {
         let default = Config {
             server_url: PLACEHOLDER_URL.to_string(),
             token: "change-me-secret".to_string(),
+            bt_mac: None,
         };
 
         let toml_str = toml::to_string_pretty(&default)
